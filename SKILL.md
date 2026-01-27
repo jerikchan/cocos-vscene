@@ -19,8 +19,9 @@ description: |
   (7) "vscene status" → View index status
   (8) "vscene analyze" / "分析场景" → Generate quality analysis with scoring
   (9) "vscene review" / "审查场景" → Self-check and iterate on analysis
+  (10) "vscene pretty" / "优化场景" → Analyze hierarchy, propose optimizations, execute after approval
 
-  Keywords: vscene, scene index, progressive loading, scene cache, node lookup, Cocos Creator, scene analysis, quality score
+  Keywords: vscene, scene index, progressive loading, scene cache, node lookup, Cocos Creator, scene analysis, quality score, hierarchy optimization
 ---
 
 # Cocos VScene - Scene Index & Analysis System
@@ -65,6 +66,7 @@ description: |
 | `vscene status` | ❌ | View index status |
 | `vscene analyze` | ✅ | **Generate quality analysis with scoring** |
 | `vscene review` | ❌ | **Self-check analysis, suggest improvements** |
+| `vscene pretty` | ✅ | **Analyze hierarchy, propose & execute optimizations** |
 
 ---
 
@@ -260,6 +262,159 @@ vscene review
 
 ---
 
+### pretty Command (Hierarchy Optimization)
+
+**Core Workflow: Analyze → Propose → Confirm → Execute**
+
+```
+vscene pretty
+  │
+  ├─ Phase 1: Analysis (分析阶段)
+  │   ├─ Check/Load index (auto pull if needed)
+  │   ├─ Detect naming issues (node1, New Node, etc.)
+  │   ├─ Detect hierarchy issues (depth > 6, scattered nodes)
+  │   ├─ Detect structure issues (ungrouped, mixed concerns)
+  │   └─ Generate issue list with severity
+  │
+  ├─ Phase 2: Proposal (方案生成)
+  │   ├─ Generate optimization operations
+  │   │   ├─ Rename operations (重命名)
+  │   │   ├─ Reparent operations (调整父节点)
+  │   │   ├─ Reorder operations (调整顺序)
+  │   │   └─ Group operations (分组整理)
+  │   ├─ Preview before/after structure
+  │   └─ Estimate impact (affected nodes count)
+  │
+  ├─ Phase 3: Confirmation (用户确认) ⏸️
+  │   ├─ Display proposal to user
+  │   ├─ Wait for user decision:
+  │   │   ├─ "同意" / "执行" → Proceed to Phase 4
+  │   │   ├─ "修改" + feedback → Revise proposal
+  │   │   └─ "取消" → Abort
+  │   └─ User can select specific operations
+  │
+  └─ Phase 4: Execution (执行阶段)
+      ├─ Execute via MCP node_modify
+      ├─ Batch operations for efficiency
+      ├─ Update local index
+      └─ Output: Execution summary
+```
+
+#### Optimization Rules (优化规则)
+
+**1. Naming Optimization (命名优化)**
+
+| Pattern | Issue | Suggested Fix |
+|---------|-------|---------------|
+| `node`, `node1`, `node2` | 无意义命名 | 根据子节点/组件推断语义名 |
+| `New Node`, `Node` | 默认名称 | 根据上下文推断 |
+| `节点1`, `测试` | 临时命名 | 提示用户提供语义名 |
+| Mixed case (`playerNode`) | 大小写不规范 | `PlayerNode` (PascalCase) |
+
+**2. Hierarchy Optimization (层级优化)**
+
+| Issue | Criteria | Action |
+|-------|----------|--------|
+| 过深层级 | depth > 6 | 提升到合适父节点 |
+| 单子节点链 | A→B→C (each has 1 child) | 扁平化，合并中间节点 |
+| 散落逻辑节点 | Logic nodes under render | 移动到 LogicRoot |
+| 散落 UI 节点 | UI nodes outside Canvas | 移动到 Canvas 下 |
+
+**3. Structure Optimization (结构优化)**
+
+| Issue | Criteria | Action |
+|-------|----------|--------|
+| 未分组 | >10 siblings at root | 按类型分组到容器 |
+| 混合关注点 | UI + Logic + Render mixed | 分离到不同容器 |
+| 重复结构 | Similar node patterns | 建议转为 Prefab |
+
+#### Proposal Output Format (方案输出格式)
+
+```markdown
+## VScene Pretty: gameScene
+
+### 检测到的问题 (Issues Found)
+
+| # | 类型 | 节点 | 问题 | 严重度 |
+|---|------|------|------|--------|
+| 1 | 命名 | `node1` | 无意义命名 | ⚠️ |
+| 2 | 命名 | `New Node` | 默认名称 | ⚠️ |
+| 3 | 层级 | `A/B/C/D/E/F/G` | 层级过深 (7层) | ❌ |
+| 4 | 结构 | `Canvas/PlayerCtrl` | 逻辑组件在UI容器下 | ⚠️ |
+
+### 优化方案 (Optimization Plan)
+
+#### 重命名操作 (Rename)
+| # | 原名称 | 新名称 | UUID |
+|---|--------|--------|------|
+| R1 | `node1` | `Environment` | abc123 |
+| R2 | `New Node` | `GameManager` | def456 |
+
+#### 层级调整 (Reparent)
+| # | 节点 | 原父节点 | 新父节点 | 原因 |
+|---|------|----------|----------|------|
+| P1 | `PlayerCtrl` | `Canvas` | `LogicRoot` | 逻辑组件应在逻辑容器 |
+| P2 | `DeepNode` | `A/B/C/D/E/F` | `A/B` | 层级扁平化 |
+
+#### 分组操作 (Group)
+| # | 新容器 | 包含节点 | 原因 |
+|---|--------|----------|------|
+| G1 | `Managers` | `GameMgr, AudioMgr, UIMgr` | 管理器分组 |
+
+### 预览 (Preview)
+
+**Before:**
+```
+gameScene
+├─ node1
+├─ New Node [GameManager]
+├─ Canvas
+│  └─ PlayerCtrl [PlayerController]  ⚠️
+└─ A/B/C/D/E/F/G  ❌
+```
+
+**After:**
+```
+gameScene
+├─ Environment (原 node1)
+├─ LogicRoot
+│  ├─ GameManager (原 New Node)
+│  └─ PlayerCtrl ✅
+├─ Canvas
+└─ A/B/DeepNode ✅
+```
+
+### 影响范围
+- 重命名: 2 个节���
+- 移动: 2 个节点
+- 新建容器: 1 个
+
+---
+**请确认是否执行以上优化？**
+- 输入 `同意` 或 `执行` 执行全部操作
+- 输入 `执行 R1 P1` 执行指定操作
+- 输入 `修改` + 反馈 调整方案
+- 输入 `取消` 放弃优化
+```
+
+#### Execution Output (执行结果)
+
+```markdown
+## 执行完成 ✅
+
+### 执行结果
+| # | 操作 | 状态 |
+|---|------|------|
+| R1 | `node1` → `Environment` | ✅ 成功 |
+| R2 | `New Node` → `GameManager` | ✅ 成功 |
+| P1 | `PlayerCtrl` → `LogicRoot` | ✅ 成功 |
+
+### 索引已更新
+场景已保存，建议运行 `vscene analyze` 查看优化后评分。
+```
+
+---
+
 ## Analysis Document Template
 
 See [references/analysis-template.md](references/analysis-template.md) for full template.
@@ -292,6 +447,17 @@ vscene analyze           # Generate analysis
 # Make improvements to scene...
 vscene review            # Check progress
 vscene analyze           # Full re-analysis
+```
+
+### Auto Optimization
+
+```bash
+vscene pretty            # Analyze and propose optimizations
+# Review proposal, then:
+# - "同意" to execute all
+# - "执行 R1 P1" to execute specific operations
+# - "修改" + feedback to revise
+# - "取消" to abort
 ```
 
 ### Check Specific Issues
