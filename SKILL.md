@@ -1,46 +1,28 @@
 ---
 name: cocos-vscene
 description: |
-  Cocos Creator Virtual Scene Index System - Lightweight scene structure cache with progressive loading and quality analysis.
+  Use when working with Cocos Creator scenes and needing to query, browse, analyze, map, or optimize scene node structures. Triggers on "vscene" commands or Chinese equivalents: 拉取场景索引, 读取场景, 分析场景, 审查场景, 场景地图, 优化场景. Also triggers on scene node lookup, scene quality scoring, scene hierarchy review, or scene structure mapping needs.
 
-  Core value:
-  - Local index: Fast node lookup without querying MCP every time
-  - Progressive loading: Large scenes load in layers to avoid context explosion
-  - Offline ready: read mode works without MCP connection
-  - Quality analysis: Score and review scene structure, code-scene relations
-
-  Triggers:
-  (1) "vscene pull" / "拉取场景索引" → Build local index
-  (2) "vscene read" / "读取场景" → Read from index
-  (3) "vscene read --depth N" → Progressive load with depth
-  (4) "vscene find xxx" → Search nodes in index
-  (5) "vscene detail uuid" → Query node details via MCP
-  (6) "vscene diff" → Compare index with real scene
-  (7) "vscene status" → View index status
-  (8) "vscene analyze" / "分析场景" → Generate quality analysis with scoring
-  (9) "vscene review" / "审查场景" → Self-check and iterate on analysis
-  (10) "vscene pretty" / "优化场景" → Analyze hierarchy, propose optimizations, execute after approval
-
-  Keywords: vscene, scene index, progressive loading, scene cache, node lookup, Cocos Creator, scene analysis, quality score, hierarchy optimization
+  Keywords: vscene, scene index, scene cache, node lookup, Cocos Creator, scene analysis, quality score, scene map, node annotation, hierarchy optimization, progressive loading
 ---
 
 # Cocos VScene - Scene Index & Analysis System
 
 ## Design Philosophy
 
-**VScene = Index (索引) + Analysis (分析)**
+**VScene = Index (索引) + Map (地图) + Analysis (分析)**
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    VScene System                            │
-├─────────────────────────┬───────────────────────────────────┤
-│   Index Layer (索引层)   │      Analysis Layer (分析层)      │
-├─────────────────────────┼───────────────────────────────────┤
-│ • Fast lookup           │ • Structure quality scoring       │
-│ • Node/Component cache  │ • Code-scene relation analysis    │
-│ • Offline capable       │ • Business module identification  │
-│ • Minimal context       │ • Self-check & iteration          │
-└─────────────────────────┴───────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                           VScene System                                  │
+├──────────────────────┬──────────────────────┬────────────────────────────┤
+│  Index Layer (索引层) │  Map Layer (地图层)   │   Analysis Layer (分析层)   │
+├──────────────────────┼──────────────────────┼────────────────────────────┤
+│ • Fast lookup        │ • Key node extract   │ • Structure quality score  │
+│ • Node/Component     │ • Bilingual annotate │ • Code-scene relations     │
+│ • Offline capable    │ • Smart collapse     │ • Module identification    │
+│ • Minimal context    │ • Human+AI readable  │ • Self-check & iteration   │
+└──────────────────────┴──────────────────────┴────────────────────────────┘
 ```
 
 | Principle | Description |
@@ -66,7 +48,10 @@ description: |
 | `vscene status` | ❌ | View index status |
 | `vscene analyze` | ✅ | **Generate quality analysis with scoring** |
 | `vscene review` | ❌ | **Self-check analysis, suggest improvements** |
+| `vscene map` | ❌* | **Generate annotated scene map with bilingual comments** |
 | `vscene pretty` | ✅ | **Analyze hierarchy, propose & execute optimizations** |
+
+_* Offline if index exists; auto-pulls (requires MCP) if no index available._
 
 ---
 
@@ -77,6 +62,8 @@ description: |
 ├── manifest.json                    # Scene manifest (场景清单)
 ├── scenes/
 │   └── {sceneName}.json             # Scene index (场景索引)
+├── maps/
+│   └── {sceneName}.map.md           # Scene map (场景地图)
 └── analysis/
     └── {sceneName}.analysis.md      # Quality analysis (质量分析)
 ```
@@ -107,8 +94,8 @@ description: |
 | `c` | components | Component type names (excludes cc.* engine) |
 | `k` | key | Is key node (has important components) |
 | `d` | depth | Hierarchy depth |
-| `role` | role | Node role: `logic`/`ui`/`render`/`data`/`container` |
-| `desc` | description | One-line description (中文) |
+| `role` | role | _(planned)_ Node role: `logic`/`ui`/`render`/`data`/`container` |
+| `desc` | description | _(planned)_ One-line description (中文) |
 | `_` | children | Child nodes array |
 
 ### Node Role Classification
@@ -120,6 +107,96 @@ description: |
 | `render` | Visual elements only | MeshRenderer, Sprite (no script) |
 | `data` | Data containers | ConfigNode, AssetsNode |
 | `container` | Organizational grouping | Managers, World, UI |
+
+---
+
+## Map Layer (地图层)
+
+### map Command (Scene Map Generator)
+
+**Purpose**: Generate a navigable, annotated scene map that both humans and AI can quickly understand. Unlike `read` (full tree dump), `map` extracts only the structural skeleton and key nodes, with bilingual (EN/ZH) annotations.
+
+**Output**: `.vscene/maps/{sceneName}.map.md`
+
+**MCP**: ❌ offline if index exists, auto-pulls if not (then needs MCP)
+
+```
+vscene map
+  │
+  ├─ Step 1: Load Index
+  │   └─ If no index → auto pull (requires MCP)
+  │
+  ├─ Step 2: Filter Nodes (节点筛选)
+  │   ├─ Keep all nodes at depth 0-1 (top-level skeleton)
+  │   ├─ Keep all key nodes (k=true) at any depth
+  │   ├─ Keep ancestor containers of key nodes (path completeness)
+  │   ├─ Collapse repeated siblings (Enemy1~10 → [×10 Enemy*])
+  │   └─ Aggregate decoration leaves (→ [... N nodes])
+  │
+  ├─ Step 3: Generate Annotations (注释生成)
+  │   ├─ Component-based inference (GameManager → Core game controller / 核心游戏控制器)
+  │   ├─ Name-based translation (Player → Player character / 玩家角色)
+  │   ├─ Container inference from children (3 Buttons → Button group / 按钮组)
+  │   └─ Mark ambiguous names with [?] (weilan → ? / 围栏? [?])
+  │
+  ├─ Step 4: Render Map Document (渲染地图文档)
+  │   ├─ Header: scene info, stats, generation time
+  │   ├─ Node Map: annotated tree with smart collapse
+  │   ├─ Legend: symbol explanations
+  │   ├─ Quick Reference: flat table of key nodes (path/components/purpose)
+  │   └─ Stats: total nodes, key nodes shown, collapsed groups
+  │
+  └─ Output: .vscene/maps/{sceneName}.map.md
+```
+
+#### Command Variants
+
+```bash
+vscene map                # Generate map (auto-pull if no index)
+vscene map --refresh      # Force regenerate (overwrites existing map)
+```
+
+#### Node Filtering Rules (节点筛选规则)
+
+| Priority | Rule | Description |
+|----------|------|-------------|
+| 1 | Depth 0-1 | All top-level nodes kept (scene skeleton) |
+| 2 | Key nodes | Nodes with `k=true` kept at any depth |
+| 3 | Custom components | Nodes with non-engine components kept |
+| 4 | Ancestor containers | Parent nodes of kept nodes preserved (path integrity) |
+| 5 | Repeated siblings | Same-prefix siblings collapsed: `[×N Pattern*]` |
+| 6 | Decoration leaves | Remaining leaf nodes aggregated: `[... N nodes]` |
+
+**Collapse detection for repeated siblings:**
+
+```
+Detect pattern: ≥3 siblings sharing a common prefix (case-insensitive)
+  Enemy1, Enemy2, Enemy3 → [×3 Enemy*]
+  Zone_Oven, Zone_Helper, Zone_Fish → [×3 Zone_*]
+  tree, tree (1), tree (2) → [×3 tree*]
+```
+
+#### Annotation Inference Rules (注释推断规则)
+
+AI generates bilingual `# EN / 中文` annotations using 4 strategies (priority order):
+
+1. **Component match** → `GameManager` → `Game manager / Game管理器`
+2. **Ambiguous detection** → `node1` → `unnamed / 未命名 [?]` (checked early to prevent bad translations)
+3. **Name translation** → `Player` → `Player / 玩家`
+4. **Container inference** → children are all Buttons → `Button group / 按钮组`
+
+Full mapping tables: see [references/annotation-rules.md](references/annotation-rules.md)
+
+#### Map Output Template
+
+See [references/map-template.md](references/map-template.md) for the full output template.
+
+**Key sections:**
+1. **Header** — Scene name, generation time, node count summary
+2. **Node Map** — Annotated tree with inline `# EN / 中文` comments
+3. **Legend** — Symbol meanings (★, [×N], [...], [?])
+4. **Quick Reference** — Flat table of key nodes with path, components, purpose
+5. **Stats** — Total/shown/collapsed node counts
 
 ---
 
@@ -449,6 +526,14 @@ vscene review            # Check progress
 vscene analyze           # Full re-analysis
 ```
 
+### Generate Scene Map
+
+```bash
+vscene map               # Generate annotated scene map
+# View .vscene/maps/{scene}.map.md
+vscene map --refresh     # Force regenerate
+```
+
 ### Auto Optimization
 
 ```bash
@@ -515,7 +600,8 @@ Nodes with these components are marked as key (`k: true`):
 - [references/auto-sync.md](references/auto-sync.md) - Auto-sync flow details
 - [references/mcp-integration.md](references/mcp-integration.md) - MCP API usage
 - [references/analysis-template.md](references/analysis-template.md) - Analysis document template
-- [references/scoring-rules.md](references/scoring-rules.md) - Detailed scoring criteria
+- [references/map-template.md](references/map-template.md) - Scene map output template
+- [references/annotation-rules.md](references/annotation-rules.md) - Map annotation inference rules
 
 ---
 
@@ -523,8 +609,9 @@ Nodes with these components are marked as key (`k: true`):
 
 | Scenario | Handling |
 |----------|----------|
-| MCP disconnected + has cache | read/find/status/review work offline |
+| MCP disconnected + has cache | read/find/status/review/map work offline |
 | MCP disconnected + no cache | Error, prompt to start editor |
 | MCP disconnected + analyze | Error, MCP required for full analysis |
+| MCP disconnected + map (no index) | Error, index required (auto-pull needs MCP) |
 | Index corrupted | Auto rebuild |
 | Analysis outdated | Warn on read, suggest re-analyze |
